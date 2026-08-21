@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 日志
+logs/*.log
+logs/*.jsonl
+
+# 数据（用户上传的检测图片不提交）
+data/images/*
+!data/images/.gitkeep
+
+# 检测结果（标注图不提交）
+data/results/*
+!data/results/.gitkeep
+
+# 长期记忆索引
+data/memory/
+
+# RAG 知识库:转换后的 MD 与持久化向量索引(可由 PDF 重新生成,不提交)
+rag_data/md/
+rag_data/storage/
+
+# 参考文件（不上传）
+reference/
+
+# 测试缓存
+.pytest_cache/
+tests/__pycache__/
+
+# 敏感配置（API Key 在 config.yaml 中，仅提交模板 .example）
+config/config.yaml
+
+# YOLOv8 权重文件（体积大，不提交）
+*.pt
+
+# 临时文件
+*.tmp
+*.temp
+~$*

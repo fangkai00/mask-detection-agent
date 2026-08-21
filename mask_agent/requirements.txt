@@ -1,0 +1,46 @@
+# mask-detection-agent 依赖
+# Python 3.10+
+
+# LangGraph + LangChain
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+
+# LLM 客户端
+openai>=1.30.0
+
+# 数据模型
+pydantic>=2.0.0
+
+# YOLOv8 口罩检测
+ultralytics>=8.0.0
+torch>=1.6.0
+torchvision>=0.15.0
+opencv-python>=4.5.0
+numpy>=1.24.0
+Pillow>=9.0.0
+
+# 联网搜索（DashScope enable_search 复用 openai 客户端，无需额外依赖）
+
+# RAG 知识库(LlamaIndex + DashScope Embedding)
+llama-index-core>=0.13.0
+llama-index-embeddings-dashscope>=0.3.0
+llama-index-llms-dashscope>=0.4.0
+pypdf>=4.0.0
+
+# Streamlit GUI
+streamlit>=1.30.0
+
+# FastAPI 检测服务(可选: MASK_USE_API=true 时使用)
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+
+# HTTP 客户端(MaskDetectionAPITool 用)
+requests>=2.28.0
+aiohttp>=3.8.0
+
+# 配置
+pyyaml>=6.0
+

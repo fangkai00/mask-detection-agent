@@ -1,0 +1,158 @@
+# ============================================================
+# 口罩检测智能体全局配置(模板文件)
+# ============================================================
+# 使用方法:
+#   cp config/config.yaml.example config/config.yaml
+#   然后在 config.yaml 中填入你的真实 API Key
+#
+# 注意:config.yaml 已在 .gitignore 中,不会被提交到 GitHub
+# ============================================================
+
+# ============================================================
+# LLM 配置(key 直接填,不用环境变量)
+# ============================================================
+# 阿里云百炼(DashScope)API Key —— 直接填写
+DASHSCOPE_API_KEY: "sk-your-dashscope-key-here"
+
+# 主决策 LLM:负责任务规划、工具选择、检测结果解读
+MAIN_LLM_MODEL: "qwen-max"
+
+# DashScope 的 OpenAI 兼容接口地址
+LLM_BASE_URL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 主 LLM 调用温度(决策类任务偏低,减少随机性)
+MAIN_LLM_TEMPERATURE: 0.0
+
+# LLM 单次请求最大 token
+LLM_MAX_TOKENS: 4096
+
+# ============================================================
+# YOLOv8 口罩检测模型配置
+# ============================================================
+# 训练好的模型权重路径(相对项目根)
+# 训练完成后会生成在 runs/mask_yolov8_v2/train*/weights/best.pt
+# 若留空,工具会自动搜索最新训练目录下的 best.pt
+MASK_MODEL_WEIGHTS: "../runs/mask_yolov8_v2/train/weights/best.pt"
+
+# 检测置信度阈值:只保留 conf 大于此值的检测框
+# 提高 = 更少假阳性(误检),降低 = 更多召回(漏检少)
+MASK_CONF_THRESHOLD: 0.25
+
+# NMS IOU 阈值:两框重叠超过此值算同一目标去重
+# 密集人群可降到 0.5
+MASK_IOU_THRESHOLD: 0.7
+
+# 检测使用的设备:auto / cpu / 0(GPU 0) / 1(GPU 1)
+MASK_DEVICE: "auto"
+
+# 类别名称(与 data.yaml 中的 names 顺序一致)
+# 0=mask(戴口罩), 1=no-mask(未戴口罩)
+MASK_CLASS_NAMES:
+  - "mask"
+  - "no-mask"
+
+# 检测图片尺寸(YOLOv8 默认 640)
+MASK_IMG_SIZE: 640
+
+# 是否保存标注后的检测图片
+MASK_SAVE_ANNOTATED: true
+
+# ============================================================
+# 检测调用模式配置(可选)
+# ============================================================
+# false=进程内直接调用(默认,最快,模型常驻内存)
+# true =通过 HTTP API 调用独立服务(需先启动 api_server.py)
+MASK_USE_API: false
+
+# API 服务地址(MASK_USE_API=true 时使用)
+MASK_API_BASE_URL: "http://localhost:8000"
+
+# FastAPI 服务监听配置(启动 api_server.py 时用)
+MASK_API_HOST: "0.0.0.0"
+MASK_API_PORT: 8000
+
+# ============================================================
+# 联网搜索配置(用于回答口罩政策等时效性问题)
+# ============================================================
+# 复用 DashScope Qwen 的 enable_search 能力
+SEARCH_LLM_MODEL: "qwen-max"
+SEARCH_RESULT_COUNT: 6
+SEARCH_NUM_RESULTS: 5
+
+# ============================================================
+# RAG 知识库配置(基于 LlamaIndex + DashScope Embedding)
+# 用本地 PDF 文档构建向量索引,planner 可路由到 rag_search 工具检索知识
+# ============================================================
+# PDF 原文件目录(把待入库的 PDF 放这里)
+RAG_PDF_DIR: "rag_data"
+# 转换后的 Markdown 目录(PDF→MD 后存这里,LlamaIndex 从此加载)
+RAG_MD_DIR: "rag_data/md"
+# LlamaIndex 持久化索引目录(向量库存储,首次构建后复用)
+RAG_STORAGE_DIR: "rag_data/storage"
+# 检索返回的相似片段数(top-k)
+RAG_TOP_K: 4
+# RAG 查询引擎用的 LLM 模型名(留空则与 MAIN_LLM_MODEL 一致)
+RAG_LLM_MODEL: ""
+# DashScope Embedding 模型名(text-embedding-v2 兼容中英文)
+RAG_EMBED_MODEL: "text-embedding-v2"
+
+# ============================================================
+# PDF → Markdown 转换配置
+# ============================================================
+# MinerU API Key(高质量转换,需在 mineru.net 申请;留空则用 pypdf 兜底)
+MINERU_API_KEY: ""
+# 是否对扫描版 PDF 启用 OCR(MinerU 模式)
+MINERU_IS_OCR: false
+# 是否启用公式识别(MinerU 模式)
+MINERU_ENABLE_FORMULA: true
+
+# ============================================================
+# 编排配置
+# ============================================================
+# Planner 最大步数(防死循环)
+MAX_PLANNER_STEPS: 4
+
+# ============================================================
+# 错误反馈闭环配置
+# ============================================================
+# 单工具代码级重试上限(仅瞬时错误:网络抖动/超时/限流)
+TOOL_MAX_RETRIES: 2
+
+# 同一工具在图执行中允许的最大失败次数(超过则 planner 应放弃该工具)
+MAX_TOOL_ERRORS: 3
+
+# 错误案例库 jsonl 路径(相对项目根)
+ERROR_MEMORY_FILE: "logs/error_cases.jsonl"
+
+# Few-shot 嵌入到 Tool 提示词的最大案例数
+ERROR_FEWSHOT_MAX_CASES: 3
+
+# ============================================================
+# 日志与可观测性
+# ============================================================
+LOG_DIR: "logs"
+STEP_LOG_FILE: "logs/steps.jsonl"
+
+# ============================================================
+# 数据目录
+# ============================================================
+# 用户上传的待检测图片目录
+UPLOAD_IMAGE_DIR: "data/images"
+# 检测结果(标注图)输出目录
+RESULT_IMAGE_DIR: "data/results"
+# 长期记忆索引目录
+MEMORY_DIR: "data/memory"
+
+# ============================================================
+# 检测结果报告配置
+# ============================================================
+# 触发免责声明的关键词(检测建议类)
+DISCLAIMER_TRIGGERS:
+  - "未戴口罩"
+  - "违规"
+  - "不合格"
+  - "建议"
+  - "提醒"
+
+# 免责声明文案
+DISCLAIMER_TEXT: "【提示】检测结果由 AI 模型自动生成,可能存在误判,建议人工复核确认。"

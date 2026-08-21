@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLOv8 口罩检测 - 四次实验对比与部署建议</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Microsoft YaHei", "Segoe UI", sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 {
+            color: #fff;
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 2.2em;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .subtitle {
+            color: rgba(255,255,255,0.9);
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.05em;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        h2 {
+            color: #4a4a4a;
+            border-left: 4px solid #764ba2;
+            padding-left: 12px;
+            margin-bottom: 18px;
+            font-size: 1.4em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.92em;
+        }
+        th, td {
+            padding: 10px 12px;
+            text-align: center;
+            border-bottom: 1px solid #e8e8e8;
+        }
+        th {
+            background: #f7f7f7;
+            color: #555;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        td:first-child, th:first-child {
+            text-align: left;
+            font-weight: 500;
+            background: #fafafa;
+        }
+        .best {
+            background: #e8f5e9 !important;
+            color: #2e7d32;
+            font-weight: 700;
+        }
+        .best td { background: #e8f5e9 !important; }
+        .worst {
+            background: #ffebee !important;
+            color: #c62828;
+        }
+        .worst td { background: #ffebee !important; }
+        .neutral td { background: #fff8e1 !important; }
+        .exp-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.72em;
+            font-weight: 600;
+            margin-left: 4px;
+            color: #fff;
+        }
+        .badge-1 { background: #4caf50; }
+        .badge-2 { background: #f44336; }
+        .badge-3 { background: #2196f3; }
+        .badge-4 { background: #ff9800; }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 18px;
+            margin-top: 15px;
+        }
+        .summary-item {
+            background: linear-gradient(135deg, #f9f9f9 0%, #efefef 100%);
+            border-radius: 10px;
+            padding: 18px;
+            border-left: 4px solid #764ba2;
+        }
+        .summary-item h3 {
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 1.05em;
+        }
+        .summary-item p {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .conclusion {
+            background: linear-gradient(135deg, #fff 0%, #fafafa 100%);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 18px;
+            border: 1px solid #e0e0e0;
+        }
+        .conclusion p {
+            margin-bottom: 10px;
+            color: #555;
+        }
+        .conclusion strong { color: #764ba2; }
+        .deploy-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 20px;
+            text-align: center;
+        }
+        .deploy-box h2 { color: #fff; border-left-color: #ffd54f; }
+        .deploy-box p { color: rgba(255,255,255,0.95); margin-bottom: 8px; }
+        .deploy-path {
+            background: rgba(0,0,0,0.3);
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.95em;
+            display: inline-block;
+            margin-top: 8px;
+        }
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+            margin-top: 20px;
+            font-size: 0.85em;
+        }
+        @media (max-width: 768px) {
+            h1 { font-size: 1.6em; }
+            .card { padding: 15px; }
+            table { font-size: 0.78em; }
+            th, td { padding: 6px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YOLOv8 口罩检测实验对比</h1>
+        <p class="subtitle">数据集：MaskDataSet（1002 张，2 类：mask / no-mask） · 硬件：NVIDIA RTX A6000 · 四次实验</p>
+
+        <!-- 评估指标 -->
+        <div class="card">
+            <h2>评估指标对比</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>指标</th>
+                        <th>实验 1<span class="exp-badge badge-1">m+640+LRF0.01</span></th>
+                        <th>实验 2<span class="exp-badge badge-2">l+832+LRF0.05</span></th>
+                        <th>实验 3<span class="exp-badge badge-3">m+832+LRF0.05</span></th>
+                        <th>实验 4<span class="exp-badge badge-4">m+832+LRF0.01</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Precision (mP)</td>
+                        <td class="best">0.8821 🏆</td>
+                        <td class="worst">0.8250</td>
+                        <td class="neutral">0.8685</td>
+                        <td class="worst">0.8005</td>
+                    </tr>
+                    <tr>
+                        <td>Recall (mR)</td>
+                        <td>0.7926</td>
+                        <td class="worst">0.7870</td>
+                        <td class="neutral">0.8167</td>
+                        <td class="best">0.8436 🏆</td>
+                    </tr>
+                    <tr>
+                        <td>mAP@0.5</td>
+                        <td class="neutral">0.8839</td>
+                        <td class="worst">0.8640</td>
+                        <td class="best">0.8896 🏆</td>
+                        <td class="neutral">0.8757</td>
+                    </tr>
+                    <tr>
+                        <td><strong>mAP@0.5:0.95</strong></td>
+                        <td class="best">0.6106 🏆</td>
+                        <td class="worst">0.5760</td>
+                        <td class="neutral">0.6069</td>
+                        <td class="neutral">0.6040</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 参数对比 -->
+        <div class="card">
+            <h2>训练参数对比</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>参数</th>
+                        <th>实验 1</th>
+                        <th>实验 2</th>
+                        <th>实验 3</th>
+                        <th>实验 4</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>预训练权重</td>
+                        <td>yolov8m.pt</td>
+                        <td class="worst">yolov8l.pt</td>
+                        <td>yolov8m.pt</td>
+                        <td>yolov8m.pt</td>
+                    </tr>
+                    <tr>
+                        <td>参数量</td>
+                        <td>25.9M</td>
+                        <td>43.7M ↑</td>
+                        <td>25.9M</td>
+                        <td>25.9M</td>
+                    </tr>
+                    <tr>
+                        <td>图像尺寸 (imgsz)</td>
+                        <td>640</td>
+                        <td>832</td>
+                        <td>832</td>
+                        <td>832</td>
+                    </tr>
+                    <tr>
+                        <td>EPOCHS（上限）</td>
+                        <td>100</td>
+                        <td>200</td>
+                        <td>200</td>
+                        <td>200</td>
+                    </tr>
+                    <tr>
+                        <td>实际训练 epoch</td>
+                        <td>100（跑完）</td>
+                        <td>146（中断）</td>
+                        <td>125（早停）</td>
+                        <td>~125（早停）</td>
+                    </tr>
+                    <tr>
+                        <td>LR0</td>
+                        <td>0.0005</td>
+                        <td>0.0005</td>
+                        <td>0.0005</td>
+                        <td>0.0005</td>
+                    </tr>
+                    <tr>
+                        <td>LRF</td>
+                        <td>0.01 ✅</td>
+                        <td class="worst">0.05</td>
+                        <td>0.05</td>
+                        <td>0.01 ✅</td>
+                    </tr>
+                    <tr>
+                        <td>final_lr</td>
+                        <td>5e-6</td>
+                        <td>2.5e-5</td>
+                        <td>2.5e-5</td>
+                        <td>5e-6</td>
+                    </tr>
+                    <tr>
+                        <td>训练时长</td>
+                        <td>1h41min</td>
+                        <td class="worst">4h16min</td>
+                        <td>3h39min</td>
+                        <td>~3h39min</td>
+                    </tr>
+                    <tr>
+                        <td>结果目录</td>
+                        <td>train/ val-3</td>
+                        <td>train-2/ val-4</td>
+                        <td>train-3/ val-5</td>
+                        <td>train-4/ val-6</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 关键结论 -->
+        <div class="card">
+            <h2>关键结论</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <h3>🏆 综合最优：实验 1</h3>
+                    <p>mAP@0.5:0.95 最高（0.6106），Precision 最高（0.8821），训练时间最短（1h41min）</p>
+                </div>
+                <div class="summary-item">
+                    <h3>🎯 最高 Recall：实验 4</h3>
+                    <p>Recall=0.8436（最高），832 分辨率 + LRF=0.01 让模型检出更多目标</p>
+                </div>
+                <div class="summary-item">
+                    <h3>⚠️ 失败案例：实验 2</h3>
+                    <p>yolov8l（43.7M 参数）+ 958 张小数据集，明显过拟合，所有指标最差</p>
+                </div>
+                <div class="summary-item">
+                    <h3>💡 意外发现</h3>
+                    <p>实验 4 把 LRF 从 0.05 改回 0.01，mAP50-95 反而略降（0.6069→0.6040），但 Recall 大幅提升</p>
+                </div>
+            </div>
+
+            <div class="conclusion">
+                <p><strong>📊 四次实验综合分析：</strong></p>
+                <p>1. <strong>实验 1（综合最优）</strong>：yolov8m + 640 + LRF=0.01。mAP@0.5:0.95 = 0.6106（最高），训练时间最短（1h41min），各指标均衡优秀。</p>
+                <p>2. <strong>实验 2（过拟合）</strong>：yolov8l + 832 + LRF=0.05。参数量翻倍但数据不足，所有指标最差。</p>
+                <p>3. <strong>实验 3（高分辨率）</strong>：yolov8m + 832 + LRF=0.05。mAP@0.5 最高（0.8896），但 LRF=0.05 让后期震荡。</p>
+                <p>4. <strong>实验 4（高召回）</strong>：yolov8m + 832 + LRF=0.01。Recall 最高（0.8436），但 Precision 最低（0.8005），出现"多检测"倾向。</p>
+                <p><strong>🔍 实验 3 vs 实验 4 对比（同 imgsz=832，仅 LRF 不同）：</strong></p>
+                <p>· LRF 从 0.05 → 0.01：终点 lr 从 2.5e-5 → 5e-6（更小，理论上更精细收敛）</p>
+                <p>· 实际结果：mAP50-95 略降（0.6069 → 0.6040），但 Recall 提升（0.8167 → 0.8436）</p>
+                <p>· 推测：832 分辨率已经能让模型充分学习，更小的 final_lr 反而让模型过度收敛，倾向于"保守检测"（多检出，宁可错杀）</p>
+            </div>
+        </div>
+
+        <!-- 部署建议 -->
+        <div class="deploy-box">
+            <h2>🚀 最终部署建议</h2>
+            <p><strong>选择实验 1 的 best.pt 作为部署模型</strong></p>
+            <p>理由：mAP@0.5:0.95 最高（0.6106），业界标准综合评估指标最优；训练时间最短，迭代成本低；各指标均衡。</p>
+            <div class="deploy-path">
+                D:\project_k\mask-detection-agent\runs\mask_yolov8_v2\train\weights\best.pt
+            </div>
+            <p style="margin-top:15px;font-size:0.9em;">替代方案：如更看重"不漏检未戴口罩者"（安全场景），可选实验 4 的 best.pt（Recall=0.8436 最高）</p>
+        </div>
+
+        <p class="footer">生成时间：2026-08-17 · 项目：mask-detection-agent · 数据集：MaskDataSet · 四次实验对比</p>
+    </div>
+</body>
+</html>
