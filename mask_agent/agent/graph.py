@@ -195,14 +195,29 @@ def _parse_route(content: str) -> RouteDecision:
 
 
 def _summarize_gathered(state: AgentState) -> str:
-    """汇总已收集的检测结果和搜索信息,供 planner 与 finalizer 使用。"""
+    """汇总已收集的检测结果和搜索信息,供 planner 与 finalizer 使用。
+
+    记忆分层(对应 cli._build_state 注入的两种前缀):
+    - 短期记忆:本会话最近 N 轮直接进 context,标识为 `[历史对话第X轮]`
+    - 长期记忆:tools/memory_rag.recall 召回的早期相关对话,标识为
+      `[长期记忆-相关历史召回]`;与短期记忆分组呈现,便于 LLM 区分时效
+    """
     parts = []
 
-    # 短期记忆:最近 4 轮对话历史
+    # 短期记忆:本会话最近 N 轮直接进 context 的对话片段
+    short_term_parts = []
+    long_term_parts = []
     for m in state.get("messages") or []:
         content = m.content if isinstance(m.content, str) else str(m.content)
         if "[历史对话" in content:
-            parts.append(content[:300])
+            short_term_parts.append(content[:300])
+        elif "[长期记忆" in content:
+            long_term_parts.append(content[:400])
+
+    if short_term_parts:
+        parts.append("[短期记忆-本会话近期]\n" + "\n".join(short_term_parts))
+    if long_term_parts:
+        parts.append("[长期记忆-相关历史召回]\n" + "\n".join(long_term_parts))
 
     # 检测结果
     det = state.get("detection_result")

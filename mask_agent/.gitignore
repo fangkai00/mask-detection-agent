@@ -25,8 +25,11 @@ data/images/*
 data/results/*
 !data/results/.gitkeep
 
-# 长期记忆索引
+# 对话历史 JSON 审计(每会话一文件)
 data/memory/
+
+# 长期记忆向量索引(LlamaIndex 持久化,可由对话重新写入,不提交)
+data/memory_index/
 
 # RAG 知识库:转换后的 MD 与持久化向量索引(可由 PDF 重新生成,不提交)
 rag_data/md/

@@ -126,6 +126,19 @@ graph TB
     D3 -.->|"检索"| E3
 ```
 
+### 记忆分层
+
+系统对话记忆分四层,避免短期/长期/RAG 工具概念混淆:
+
+| 层 | 载体 | 实现 | 作用范围 |
+|---|---|---|---|
+| 短期记忆 | LLM context | `agent/cli.py:_build_state` 把本会话最近 N 轮(`SHORT_TERM_TURNS`,默认 8)直接拼到 `messages` | 本会话近邻,精确但受窗口限制 |
+| 长期记忆 | RAG 向量库 | `tools/memory_rag.py` 把每轮对话向量化写入 `data/memory_index/`,下轮用 `user_query` 语义召回相关早期对话 | 跨会话、跨重启,突破窗口与时间衰减 |
+| 文档知识库 | RAG 工具 | `tools/rag_knowledge.py` 检索 `rag_data/` 下 PDF/MD(口罩标准、生物安全规范) | 专业领域文档,与对话记忆完全独立 |
+| JSON 审计 | JSON 文件 | `data/memory/session_*.json` 由 `session_store.py` 落盘 | `/export`、侧边栏会话列表、跨重启查看 |
+
+> 关键:短期记忆只承载本会话近邻对话;长期记忆由独立向量库 `memory_rag.py` 承担,而非复用文档知识库索引——避免"对话历史"与"专业文档"在召回时串味。
+
 ### 执行流程图
 
 ```mermaid
@@ -223,8 +236,8 @@ mask-detection-agent/
 │   ├── agent/                        #   LangGraph 编排（planner / 工具节点 / finalizer）
 │   ├── config/                       #   配置（config.yaml.example 模板）
 │   ├── prompts/                      #   提示词
-│   ├── tools/                        #   工具（口罩检测 / 联网搜索 / RAG 检索 / PDF转MD）
-│   ├── data/                         #   用户数据（不入库）
+│   ├── tools/                        #   工具(口罩检测 / 联网搜索 / RAG 文档检索 / 对话长期记忆 / PDF转MD)
+│   ├── data/                         #   用户数据(图片/结果/对话JSON审计/长期记忆向量索引,均不入库)
 │   └── rag_data/                     #   RAG 知识库（PDF/索引不入库）
 ├── MaskDataSet/                      # 口罩检测数据集（mask / no-mask）
 ├── yolov8_mask_v2/                   # YOLOv8 训练脚本（v2，推荐）
@@ -241,8 +254,9 @@ mask-detection-agent/
 
 1. **API Key 安全**：`config.yaml` 已 gitignore，首次配置从 `.example` 复制
 2. **YOLOv8 权重**：`*.pt` 不入库，请自行训练或下载
-3. **RAG 知识库**：将 PDF 放入 `mask_agent/rag_data/`，首次启动自动构建索引
-4. **第三方库**：`libs/` 和 `vendor/` 不入库，通过 `requirements.txt` 安装
+3. **文档知识库(RAG 工具)**:将 PDF 放入 `mask_agent/rag_data/`,首次启动自动构建索引,与对话长期记忆完全独立
+4. **对话长期记忆**:`data/memory_index/` 首次对话自动构建,每轮自动向量化写入,跨会话语义召回历史对话(不入库,可由对话重新累积)
+5. **第三方库**:`libs/` 和 `vendor/` 不入库,通过 `requirements.txt` 安装
 
 ---
 

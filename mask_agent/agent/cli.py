@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import AsyncGenerator, Callable, Generator, List, Optional
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 import config
 from agent.graph import build_graph
@@ -248,6 +248,12 @@ class ConversationSession:
             elapsed_s=round(elapsed, 2),
         )
         self.turns.append(turn)
+        # 同步写入长期记忆向量库(RAG 召回源);失败不阻塞对话
+        try:
+            from tools import memory_rag
+            memory_rag.add_turn(self.session_id, turn.to_dict(), len(self.turns))
+        except Exception as _e:
+            logger.warning("写入长期记忆失败: %s", _e)
         return turn
 
     def chat_with_progress(
@@ -389,6 +395,12 @@ class ConversationSession:
             elapsed_s=round(elapsed, 2),
         )
         self.turns.append(turn)
+        # 同步写入长期记忆向量库(RAG 召回源);失败不阻塞对话
+        try:
+            from tools import memory_rag
+            memory_rag.add_turn(self.session_id, turn.to_dict(), len(self.turns))
+        except Exception as _e:
+            logger.warning("写入长期记忆失败: %s", _e)
         self._last_turn = turn
         return turn
 
@@ -425,6 +437,12 @@ class ConversationSession:
             elapsed_s=round(elapsed, 2),
         )
         self.turns.append(turn)
+        # 同步写入长期记忆向量库(RAG 召回源);失败不阻塞对话
+        try:
+            from tools import memory_rag
+            memory_rag.add_turn(self.session_id, turn.to_dict(), len(self.turns))
+        except Exception as _e:
+            logger.warning("写入长期记忆失败: %s", _e)
         self._last_turn = turn
 
     async def achat_stream(self, user_input: str, image_path: str = "") -> AsyncGenerator[str, None]:
@@ -438,20 +456,57 @@ class ConversationSession:
             self._last_turn = ConversationTurn(user_input=user_input, assistant_output="", steps=0)
 
     def _build_state(self, user_input: str, image_path: str = "") -> dict:
-        """构建图的初始状态(含最近 4 轮对话上下文,短期记忆)。"""
+        """构建图的初始状态:短期记忆(本会话近邻)+ 长期记忆(RAG 召回)。
+
+        记忆分层:
+        - 短期记忆:取本会话最近 N 轮(config.SHORT_TERM_TURNS,默认 8)直接拼到
+          messages,作为 LLM context。精确,但受窗口限制。
+        - 长期记忆:用当前 user_query 去 tools/memory_rag.recall 检索向量库,
+          召回"与当前问题相关的早期/跨会话历史片段",以 [长期记忆] 前缀注入。
+          过滤掉当前会话自身所有 turn(它们已在 self.turns / 短期窗口中,避免重复)。
+        """
         messages = []
 
-        recent_turns = self.turns[-4:] if self.turns else []
-        for i, turn in enumerate(recent_turns, 1):
+        # ---- 短期记忆:本会话最近 N 轮直接进 LLM context ----
+        short_window = int(getattr(config, "SHORT_TERM_TURNS", 8))
+        recent_turns = self.turns[-short_window:] if self.turns else []
+        total_turns = len(self.turns)
+        start_idx = max(0, total_turns - short_window)
+        for offset, turn in enumerate(recent_turns):
+            global_idx = start_idx + offset + 1  # 全局轮号(从1开始,便于长期记忆引用对齐)
             truncated_q = turn.user_input[:200]
             truncated_a = turn.assistant_output[:500]
             suffix_a = "..." if len(turn.assistant_output) > 500 else ""
             messages.append(HumanMessage(
-                content=f"[历史对话第{i}轮] 用户: {truncated_q}"
+                content=f"[历史对话第{global_idx}轮] 用户: {truncated_q}"
             ))
             messages.append(AIMessage(
-                content=f"[历史对话第{i}轮] 助手: {truncated_a}{suffix_a}"
+                content=f"[历史对话第{global_idx}轮] 助手: {truncated_a}{suffix_a}"
             ))
+
+        # ---- 长期记忆:RAG 召回相关早期对话(跨会话/超窗口) ----
+        # 排除本会话所有 turn(它们已在 self.turns / 短期窗口覆盖,避免重复召回)
+        try:
+            from tools import memory_rag
+            recalled = memory_rag.recall(
+                user_input,
+                top_k=getattr(config, "MEMORY_RECALL_TOP_K", 3),
+                exclude_sid=self.session_id,
+                exclude_recent=total_turns,  # >0 即触发过滤本会话所有轮
+            )
+            if recalled:
+                memory_lines = []
+                for r in recalled:
+                    r_sid = r.get("sid", "?")
+                    r_turn = r.get("turn", "?")
+                    r_content = (r.get("content") or "").strip().replace("\n", " ")[:280]
+                    memory_lines.append(f"[会话{r_sid}第{r_turn}轮] {r_content}")
+                messages.append(SystemMessage(
+                    content="[长期记忆-相关历史召回]\n" + "\n".join(memory_lines)
+                ))
+        except Exception as e:
+            # 长期记忆召回失败不应阻塞对话主流程
+            logger.warning("长期记忆召回失败: %s", e)
 
         messages.append(HumanMessage(content=user_input))
 

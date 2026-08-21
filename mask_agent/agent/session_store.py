@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-会话历史持久化(JSON 文件,每会话一文件)
+会话历史 JSON 持久化(每会话一文件)
+
+职责定位(与长期记忆区分):
+- 本模块 = "可读审计 / 导出 / 会话列表"用途:把对话文本+元数据存为人类可读 JSON,
+  供 Streamlit 侧边栏会话列表、/export 导出、跨重启查看历史使用。
+- 长期记忆(语义召回)由 tools/memory_rag.py 承担:每轮对话同时向量化写入
+  MEMORY_INDEX_DIR,LLM 上下文不足时按 query 召回早期相关对话。
+  本模块的 JSON 不参与语义召回,只作审计与可视化。
 
 存储位置:config.MEMORY_DIR(默认 data/memory/)
 文件名:  session_{sid}.json
@@ -8,9 +15,6 @@
 
 保留范围:对话文本 + 元数据(用户输入、助手回答、图片路径、路由、耗时、步数)
          不含 fields 结构化思考过程和完整检测结果(体积控制)
-
-用途:Streamlit session_state 是进程内内存,重启 GUI 进程即丢失。
-      本模块把会话落盘,GUI 启动时加载,实现跨重启的历史对话查看。
 """
 import json
 import os

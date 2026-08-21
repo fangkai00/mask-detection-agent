@@ -140,8 +140,20 @@ STEP_LOG_FILE: "logs/steps.jsonl"
 UPLOAD_IMAGE_DIR: "data/images"
 # 检测结果(标注图)输出目录
 RESULT_IMAGE_DIR: "data/results"
-# 长期记忆索引目录
+# 对话历史 JSON 审计目录(供 /export、会话列表、跨重启查看;
+# 真正的"长期记忆"向量索引见 MEMORY_INDEX_DIR)
 MEMORY_DIR: "data/memory"
+# 对话长期记忆向量索引目录(LlamaIndex 持久化,跨会话语义召回)
+MEMORY_INDEX_DIR: "data/memory_index"
+
+# ============================================================
+# 记忆分层配置(短期=LLM context,长期=RAG 向量库)
+# ============================================================
+# 短期记忆窗口:每轮 chat 时把当前会话最近 N 轮直接拼到 state.messages
+# (LLM 上下文,精确但有限;超过 N 轮靠 MEMORY_INDEX_DIR 向量库语义召回)
+SHORT_TERM_TURNS: 8
+# 长期记忆召回片段数(每轮 chat 前用 user_query 检索向量库,返回 top-k 历史片段)
+MEMORY_RECALL_TOP_K: 3
 
 # ============================================================
 # 检测结果报告配置
