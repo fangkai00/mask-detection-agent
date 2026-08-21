@@ -64,14 +64,16 @@
   </tr>
 </table>
 
-**训练指标**（YOLOv8m, 100 epochs, AdamW, lr=5e-4）：
+**训练指标**（实验 1：YOLOv8m, imgsz=640, 100 epochs, lr0=5e-4, lrf=0.01）：
 
 | 指标 | 值 |
 |------|-----|
-| mAP@0.5 | 0.849 |
-| mAP@0.5:0.95 | 0.583 |
-| Precision | 0.883 |
-| Recall | 0.729 |
+| Precision | 0.8821 |
+| Recall | 0.7926 |
+| mAP@0.5 | 0.8839 |
+| mAP@0.5:0.95 | **0.6106** |
+
+> 实验 1 为 4 组对比实验中的综合最优（mAP@0.5:0.95 最高、Precision 最高、训练时间最短 1h41min）。完整对比详见 [experiments_comparison.html](experiments_comparison.html)。
 
 ---
 
