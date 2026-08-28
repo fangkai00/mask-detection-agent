@@ -88,48 +88,40 @@
 ### 系统架构图
 
 ```mermaid
-graph TB
-    subgraph CLI["启动入口"]
-        A1[agent_cli.py]
-    end
+flowchart TB
+    A1["agent_cli.py 统一启动入口"]
 
     subgraph Frontend["前端交互层"]
-        B1[Streamlit GUI<br/>app_streamlit.py]
-        B2[TUI 终端<br/>agent/tui.py]
-        B3[Test 模式<br/>agent/cli.py]
+        B1["Streamlit GUI<br/>app_streamlit.py"]
+        B2["TUI 终端<br/>agent/tui.py"]
+        B3["Test 模式<br/>agent/cli.py"]
     end
 
-    subgraph Core["编排核心（单 LLM 决策）"]
-        C1[Planner 节点<br/>主 LLM 路由决策]
-        C2[Finalizer 节点<br/>主 LLM 汇总回答]
+    subgraph Core["编排核心（单 LLM：qwen-max）"]
+        C1["Planner 节点<br/>路由决策"]
+        C2["Finalizer 节点<br/>终答汇总"]
+        C1 -->|"finish"| C2
     end
 
     subgraph Tools["工具节点（被动调用）"]
-        D1[mask_detect<br/>YOLOv8 检测]
-        D2[web_search<br/>Tavily 搜索]
-        D3[rag_search<br/>LlamaIndex 检索]
+        D1["mask_detect<br/>YOLOv8 检测"]
+        D2["web_search<br/>Tavily 搜索"]
+        D3["rag_search<br/>LlamaIndex 检索"]
     end
 
-    subgraph Models["模型与服务"]
-        E1[Qwen LLM<br/>qwen-max]
-        E2[YOLOv8 权重<br/>best.pt]
-        E3[向量索引<br/>rag_data/storage]
+    subgraph Models["模型与资源"]
+        E1["Qwen LLM<br/>qwen-max"]
+        E2["YOLOv8 权重<br/>best.pt"]
+        E3["向量索引<br/>rag_data/storage"]
     end
 
-    A1 --> B1 & B2 & B3
-    B1 & B2 & B3 --> C1
-
-    C1 -->|"路由: mask_detect"| D1
-    C1 -->|"路由: search"| D2
-    C1 -->|"路由: rag_search"| D3
-    C1 -->|"路由: finish"| C2
-
-    D1 & D2 & D3 -->|"结果回传"| C1
-
-    C1 -.->|"调用"| E1
-    C2 -.->|"调用"| E1
-    D1 -.->|"加载"| E2
-    D3 -.->|"检索"| E3
+    A1 --> Frontend
+    Frontend -->|"用户输入"| Core
+    C1 -->|"路由分发"| Tools
+    Tools -->|"结果回传"| C1
+    C2 -->|"最终回答"| Frontend
+    Core -.->|"调用"| Models
+    Tools -.->|"依赖"| Models
 ```
 
 ### 记忆分层
@@ -149,32 +141,35 @@ graph TB
 
 ```mermaid
 flowchart TD
-    Start([用户提问 + 可选图片]) --> Planner[Planner 决策路由]
-    Planner --> CheckStep{步数 ≤ 上限?}
-    CheckStep -->|否| Final
-    CheckStep -->|是| Route{路由决策}
+    Start(["用户提问 + 可选图片"]) --> Planner["Planner 决策<br/>（步数超限 → 强制 finish）"]
+    Planner --> Check{"防重复检查<br/>_enforce_no_repeat"}
 
-    Route -->|mask_detect| MaskDetect[YOLOv8 检测]
-    Route -->|search| WebSearch[Tavily 搜索]
-    Route -->|rag_search| RagSearch[LlamaIndex 检索]
-    Route -->|finish| Final
+    Check -->|"放行"| ToolBox
+    Check -->|"纯重复"| Soft{"柔性重决策<br/>未超上限?"}
+    Check -->|"失败超限"| Abandon
 
-    MaskDetect & WebSearch & RagSearch --> ErrorCheck{成功?}
-    ErrorCheck -->|成功| BackToPlanner[结果回传]
-    ErrorCheck -->|失败| RetryCheck{重试 < 上限?}
-    RetryCheck -->|是| BackToPlanner
-    RetryCheck -->|否| AbandonTool[记 abandoned_tools<br/>强制 finish]
+    Soft -->|"是"| Hint["注入 NoRepeat 提示<br/>LLM 重新决策"] --> Planner
+    Soft -->|"否"| Abandon["工具记入<br/>abandoned_tools"]
 
-    BackToPlanner --> NoRepeat{防重复检查<br/>_enforce_no_repeat}
-    NoRepeat -->|未重复 / 失败重试| Planner
-    NoRepeat -->|纯重复 且 重决策 < 上限| Replan[注入 NoRepeat 提示<br/>柔性重决策 1 次]
-    Replan --> Planner
-    NoRepeat -->|重决策耗尽 / 失败超限| AbandonTool
-    AbandonTool --> Final
+    subgraph ToolBox["工具执行（safe_tool_call 包装）"]
+        direction LR
+        T1["mask_detect<br/>YOLOv8 检测"]
+        T2["web_search<br/>Tavily 搜索"]
+        T3["rag_search<br/>LlamaIndex 检索"]
+    end
 
-    Final[Finalizer 汇总回答] --> Disclaimer{触发免责声明?}
-    Disclaimer -->|是| Append[追加声明] --> End([返回回答])
-    Disclaimer -->|否| End
+    ToolBox --> Ok{"执行成功?"}
+    Ok -->|"是"| Back["结果写入 state<br/>进入下一轮"] --> Planner
+    Ok -->|"否"| Err{"失败次数<br/>未超上限?"}
+    Err -->|"是"| ErrBack["错误反馈注入<br/>LLM 修正重试"] --> Planner
+    Err -->|"否"| Abandon
+
+    Planner -.->|"finish"| Final["Finalizer 汇总回答<br/>（声明 abandoned 能力不可用）"]
+    Abandon --> Final
+
+    Final --> Disc{"触发免责声明?"}
+    Disc -->|"是"| Append["追加声明"] --> End(["返回回答"])
+    Disc -->|"否"| End
 ```
 
 ---
