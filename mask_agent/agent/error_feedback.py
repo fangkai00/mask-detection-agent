@@ -43,6 +43,11 @@ def get_max_tool_errors() -> int:
     return int(_cfg("MAX_TOOL_ERRORS", 3))
 
 
+def get_max_replan() -> int:
+    """柔性重决策上限:纯重复时注入提示让 planner 重选,超过则强制 finish。"""
+    return int(_cfg("MAX_REPLAN", 1))
+
+
 def get_error_memory_file() -> str:
     rel = _cfg("ERROR_MEMORY_FILE", "logs/error_cases.jsonl")
     if os.path.isabs(rel):

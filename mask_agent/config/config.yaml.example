@@ -130,6 +130,9 @@ TOOL_MAX_RETRIES: 2
 # 同一工具在图执行中允许的最大失败次数(超过则 planner 应放弃该工具)
 MAX_TOOL_ERRORS: 3
 
+# 柔性重决策上限:纯重复时注入提示让 planner 重选,超过此次数仍重复则强制 finish
+MAX_REPLAN: 1
+
 # 错误案例库 jsonl 路径(相对项目根)
 ERROR_MEMORY_FILE: "logs/error_cases.jsonl"
 

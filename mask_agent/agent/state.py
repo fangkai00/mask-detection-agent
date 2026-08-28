@@ -59,3 +59,13 @@ class AgentState(TypedDict):
 
     # 已执行 planner 步数(防死循环)
     steps: int
+
+    # 被放弃的工具名列表(因失败超限或纯重复被 _enforce_no_repeat 强制放弃)
+    # finalizer 据此声明"哪些部分不可用",避免编造结果。
+    # 不用 add_messages 归约,普通 List 由 _enforce_no_repeat 直接写回(覆盖式)。
+    abandoned_tools: List[str]
+
+    # 柔性重决策计数:纯重复触发时,不直接 finish,而是注入提示让 planner 重选一次。
+    # 限 MAX_REPLAN 次(防无限循环);超限则强制 finish。
+    # 由 planner 节点写回(覆盖式)。
+    replan_count: int

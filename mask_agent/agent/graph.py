@@ -26,12 +26,13 @@ import compat  # noqa: E402
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 import config
 from agent.error_feedback import (
     format_error_feedback_message,
     get_max_tool_errors,
+    get_max_replan,
     safe_tool_call,
 )
 from agent.state import AgentState
@@ -166,31 +167,36 @@ def get_planner_llm():
 def _parse_route(content: str) -> RouteDecision:
     """从 LLM 文本中解析路由 JSON,失败回退 finish。
 
-    response_format 已强约束输出为合法 JSON,但仍保留正则提取 + 容错,
-    以应对服务端偶发不遵守 schema 的情况。
+    双重保障:
+      - 服务端:response_format json_schema strict 已强约束输出为合法 JSON
+      - 客户端:用 Pydantic (RouteDecision) 真正校验字段,非法 next 值
+        (Literal 约束)或类型不符会触发 ValidationError → 走下一层兜底
+
+    解析策略(三层,逐层降级):
+      1. 整段直解:response_format 下 content 通常就是合法 JSON
+      2. 正则提取:服务端偶发不遵守 schema 时,从文本中抠出首个 JSON 对象
+      3. 全失败:返回 finish,保证图不崩
     """
-    _VALID = ("mask_detect", "search", "rag_search", "finish")
-    if content:
-        # 优先直接解析(response_format 下通常整段就是合法 JSON)
+    if not content:
+        return RouteDecision(next="finish")
+
+    # 第1层:整段直解 + Pydantic 校验
+    try:
+        d = json.loads(content)
+        return RouteDecision.model_validate(d)
+    except (json.JSONDecodeError, ValidationError):
+        pass
+
+    # 第2层:正则提取首个 JSON 对象 + Pydantic 校验
+    m = re.search(r"\{[\s\S]*\}", content)
+    if m:
         try:
-            d = json.loads(content)
-            nxt = d.get("next", "finish")
-            if nxt not in _VALID:
-                nxt = "finish"
-            return RouteDecision(next=nxt, reason=str(d.get("reason", "")))
-        except Exception:
+            d = json.loads(m.group(0))
+            return RouteDecision.model_validate(d)
+        except (json.JSONDecodeError, ValidationError):
             pass
-        # 兜底:正则提取首个 JSON 对象
-        m = re.search(r"\{[\s\S]*\}", content)
-        if m:
-            try:
-                d = json.loads(m.group(0))
-                nxt = d.get("next", "finish")
-                if nxt not in _VALID:
-                    nxt = "finish"
-                return RouteDecision(next=nxt, reason=str(d.get("reason", "")))
-            except Exception:
-                pass
+
+    # 第3层:兜底(含非法 next 值/类型不符等校验失败)
     return RouteDecision(next="finish")
 
 
@@ -271,6 +277,14 @@ def _summarize_gathered(state: AgentState) -> str:
     if err_parts:
         parts.append("[错误反馈]\n" + "\n---\n".join(err_parts))
 
+    # 已放弃的工具(因失败超限或重复被强制放弃,终答必须声明不可用,不得编造)
+    abandoned = state.get("abandoned_tools") or []
+    if abandoned:
+        parts.append(
+            "[已放弃工具] " + "、".join(abandoned)
+            + "(这些工具已不可用,对应能力部分缺失,终答必须如实说明)"
+        )
+
     return "\n\n".join(parts) if parts else "(暂无)"
 
 
@@ -284,8 +298,22 @@ def _count_tool_errors(state: AgentState, tool_name: str) -> int:
     return cnt
 
 
-def _enforce_no_repeat(decision: RouteDecision, state: AgentState) -> RouteDecision:
-    """代码级防死循环:LLM 若重复调用已产出结果的工具,强制推进或收尾。"""
+def _enforce_no_repeat(decision: RouteDecision, state: AgentState) -> tuple:
+    """代码级防死循环 + 柔性重决策。
+
+    重复判定:LLM 想调用已产出结果的工具(等价于签名重复,因参数来自固定 state)。
+    - 失败未超限:允许重试(错误反馈例外)
+    - 失败超限:强制 finish + 记 abandoned
+    - 纯重复(已成功产出且非失败重试):
+        · replan_count < MAX_REPLAN:不 finish,返回 replan_hint 让 planner 重选一次
+        · replan_count >= MAX_REPLAN:强制 finish + 记 abandoned(放弃重复的工具)
+
+    返回 (decision, abandoned_now, replan_hint):
+      - decision: 可能修正后的路由决策
+      - abandoned_now: 本次新放弃的工具名列表
+      - replan_hint: 非空字符串表示触发柔性重决策,planner 应把此提示注入 messages 让 LLM 重选;
+                     空字符串表示无需重决策(放行或已强制 finish)
+    """
     ran = set()
     if state.get("detection_result"):
         ran.add("mask_detect")
@@ -294,7 +322,7 @@ def _enforce_no_repeat(decision: RouteDecision, state: AgentState) -> RouteDecis
     if state.get("rag_results"):
         ran.add("rag_search")
     if decision.next not in ran:
-        return decision
+        return decision, [], ""
 
     # 错误反馈例外:若该工具上次返回的是错误(且未达上限),允许重试
     tool_err_cnt = _count_tool_errors(state, decision.next)
@@ -308,22 +336,57 @@ def _enforce_no_repeat(decision: RouteDecision, state: AgentState) -> RouteDecis
             "[enforce_no_repeat] %s 上次失败(第 %s/%s 次),允许 LLM 修正重试",
             decision.next, tool_err_cnt, get_max_tool_errors(),
         )
-        return decision
+        return decision, [], ""
     if tool_err_cnt >= get_max_tool_errors():
         logger.warning(
             "[enforce_no_repeat] %s 失败 %s 次超限,强制改 finish",
             decision.next, tool_err_cnt,
         )
-        return RouteDecision(next="finish", reason=f"工具 {decision.next} 失败超限,放弃")
+        return (
+            RouteDecision(next="finish", reason=f"工具 {decision.next} 失败超限,放弃"),
+            [decision.next],
+            "",
+        )
 
-    return RouteDecision(next="finish", reason="代码级收尾:避免重复工具导致死循环")
+    # 纯重复(已产出结果且非失败重试)
+    replan_cnt = int(state.get("replan_count") or 0)
+    if replan_cnt < get_max_replan():
+        # 柔性重决策:不 finish,提示 LLM 换路径
+        hint = (
+            f"[NoRepeat] 工具 {decision.next} 本轮已成功执行并产出结果(见上方已收集信息),"
+            f"禁止重复调用。请改选其他尚未执行的工具(mask_detect / search / rag_search),"
+            f"或输出 finish 进入终答。不要再次选择 {decision.next}。"
+        )
+        logger.info(
+            "[enforce_no_repeat] %s 纯重复 → 柔性重决策(第 %s/%s 次),注入提示",
+            decision.next, replan_cnt + 1, get_max_replan(),
+        )
+        # 决策保持原样,planner 会基于注入的提示重新 invoke 一次 LLM
+        return decision, [], hint
+
+    # 柔性重决策次数耗尽仍重复:强制 finish + 记 abandoned
+    logger.warning(
+        "[enforce_no_repeat] %s 纯重复且重决策已用尽(%s/%s),强制 finish",
+        decision.next, replan_cnt, get_max_replan(),
+    )
+    return (
+        RouteDecision(next="finish", reason="代码级收尾:柔性重决策耗尽,避免死循环"),
+        [decision.next],
+        "",
+    )
 
 
 # ============================================================
 # 节点函数
 # ============================================================
 def planner(state: AgentState) -> dict:
-    """主决策节点:决定下一步路由。"""
+    """主决策节点:决定下一步路由。
+
+    柔性重决策:若 _enforce_no_repeat 判定纯重复且 replan 未超限,
+    会返回 replan_hint。本节点把 hint 作为新的 HumanMessage 注入,
+    重新 invoke 一次 LLM 让它换路径;重决策结果再次过 _enforce_no_repeat
+    (此时 replan_count 已自增,若仍重复则强制 finish)。
+    """
     steps = (state.get("steps") or 0) + 1
     if steps > config.MAX_PLANNER_STEPS:
         logger.info("[planner] 达到步数上限 %s → finish", config.MAX_PLANNER_STEPS)
@@ -339,21 +402,61 @@ def planner(state: AgentState) -> dict:
         image_path=image_path,
         max_tool_errors=get_max_tool_errors(),
     )
-    msgs = [SystemMessage(content=sys), HumanMessage(content=state["user_query"])]
-    try:
-        # 用绑定了 response_format json_schema 的 planner LLM,
-        # 输出被强约束为 {"next": ..., "reason": ...}
-        resp = get_planner_llm().invoke(msgs)
-        content = resp.content if isinstance(resp.content, str) else str(resp.content)
-        decision = _parse_route(content)
-    except Exception as e:
-        logger.error("[planner] LLM 调用失败,回退 finish: %s", e)
-        decision = RouteDecision(next="finish")
+    base_msgs = [SystemMessage(content=sys), HumanMessage(content=state["user_query"])]
 
-    decision = _enforce_no_repeat(decision, state)
+    def _invoke_planner(msgs):
+        """调用 planner LLM 并解析决策,失败回退 finish。"""
+        try:
+            resp = get_planner_llm().invoke(msgs)
+            content = resp.content if isinstance(resp.content, str) else str(resp.content)
+            return _parse_route(content)
+        except Exception as e:
+            logger.error("[planner] LLM 调用失败,回退 finish: %s", e)
+            return RouteDecision(next="finish")
+
+    decision = _invoke_planner(base_msgs)
+    decision, abandoned_now, replan_hint = _enforce_no_repeat(decision, state)
+
+    # 柔性重决策:纯重复且未超限时,注入提示让 LLM 重新选一次
+    replan_count = int(state.get("replan_count") or 0)
+    new_messages = []
+    if replan_hint:
+        replan_count += 1
+        logger.info("[planner] 触发柔性重决策 %s/%s,注入 NoRepeat 提示",
+                    replan_count, get_max_replan())
+        # 把提示作为额外 HumanMessage 追加,LLM 会看到"禁止重复,请换路径"
+        replan_msgs = base_msgs + [HumanMessage(content=replan_hint)]
+        decision = _invoke_planner(replan_msgs)
+        # 重决策再过一次校验:用 replan_count 已自增的临时 state,
+        # 这样若 LLM 仍重复,会走"重决策耗尽"分支强制 finish
+        state_after_replan = dict(state)
+        state_after_replan["replan_count"] = replan_count
+        decision, abandoned_now_2, _ = _enforce_no_repeat(decision, state_after_replan)
+        # abandoned 合并(去重)
+        if abandoned_now_2:
+            abandoned_now = list(abandoned_now) + [
+                t for t in abandoned_now_2 if t not in abandoned_now
+            ]
+        # 把 NoRepeat 提示也写回 messages,供后续轮次/终答追溯
+        new_messages = [HumanMessage(content=replan_hint)]
+
+    # 累积被放弃的工具(去重保序,跨多步可能累计多个)
+    existing_abandoned = list(state.get("abandoned_tools") or [])
+    for t in abandoned_now:
+        if t not in existing_abandoned:
+            existing_abandoned.append(t)
 
     logger.info("[planner] step=%s → next=%s (%s)", steps, decision.next, decision.reason)
-    return {"next_node": decision.next, "steps": steps, "planner_reason": decision.reason}
+    result = {
+        "next_node": decision.next,
+        "steps": steps,
+        "planner_reason": decision.reason,
+        "abandoned_tools": existing_abandoned,
+        "replan_count": replan_count,
+    }
+    if new_messages:
+        result["messages"] = new_messages
+    return result
 
 
 def mask_detect_node(state: AgentState) -> dict:

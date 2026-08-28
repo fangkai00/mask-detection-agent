@@ -17,6 +17,7 @@
 
 - **单 LLM 决策 + 多工具协同**:决策 LLM 仅负责文本理解与任务规划,图像检测由独立 YOLOv8 模型承担(LLM 本身不处理图像),实现"视觉检测 + 知识检索 + 实时信息"一站式闭环。
 - **云端 / 本地双部署**:决策 LLM 可一键切换——云端用阿里云百炼(开箱即用,质量高),本地用 **Ollama** 部署(无需 API Key、数据不出域、离线可用),满足从快速体验 到 私有化落地的不同场景。
+- **柔性重决策 + 终答诚实声明**:planner 重复调用已产出工具时,不直接强制收尾,而是注入 `[NoRepeat]` 提示让 LLM 重新决策一次(限 `MAX_REPLAN` 次),给自纠机会;重决策耗尽或工具失败超限时强制 finish,并把被放弃工具写入 `state.abandoned_tools`,由 finalizer 在终答中声明"XX 功能不可用",避免编造结果。配合 prompt 层"禁止重复"软约束 + 代码层 `_enforce_no_repeat` 硬判定,构成三级防死循环保障。
 
 ---
 
@@ -162,11 +163,14 @@ flowchart TD
     ErrorCheck -->|成功| BackToPlanner[结果回传]
     ErrorCheck -->|失败| RetryCheck{重试 < 上限?}
     RetryCheck -->|是| BackToPlanner
-    RetryCheck -->|否| ForceFinish[强制 finish]
+    RetryCheck -->|否| AbandonTool[记 abandoned_tools<br/>强制 finish]
 
-    BackToPlanner --> NoRepeat{防重复检查}
-    NoRepeat --> Planner
-    ForceFinish --> Final
+    BackToPlanner --> NoRepeat{防重复检查<br/>_enforce_no_repeat}
+    NoRepeat -->|未重复 / 失败重试| Planner
+    NoRepeat -->|纯重复 且 重决策 < 上限| Replan[注入 NoRepeat 提示<br/>柔性重决策 1 次]
+    Replan --> Planner
+    NoRepeat -->|重决策耗尽 / 失败超限| AbandonTool
+    AbandonTool --> Final
 
     Final[Finalizer 汇总回答] --> Disclaimer{触发免责声明?}
     Disclaimer -->|是| Append[追加声明] --> End([返回回答])
@@ -210,6 +214,8 @@ cp mask_agent/config/config.yaml.example mask_agent/config/config.yaml
 | `OLLAMA_MODEL` | 本地 Ollama 模型名，如 `qwen2.5:7b`（`ollama` 模式必填，需先 `ollama pull`） | `ollama` 模式必填 |
 | `TAVILY_API_KEY` | Tavily 联网搜索 API Key | 是 |
 | `MASK_MODEL_WEIGHTS` | YOLOv8 权重路径（留空自动搜索） | 否 |
+| `MAX_REPLAN` | 柔性重决策上限（纯重复时注入提示让 planner 重选次数，默认 `1`） | 否 |
+| `MAX_TOOL_ERRORS` | 单工具最大失败次数（超限则放弃该工具，默认 `3`） | 否 |
 
 ### 3. 训练 YOLOv8（可选）
 
