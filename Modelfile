@@ -1,0 +1,4 @@
+﻿FROM qwen2.5:7b
+PARAMETER num_ctx 2048
+PARAMETER num_batch 512
+PARAMETER num_gpu 1

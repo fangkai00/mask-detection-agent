@@ -7,11 +7,16 @@
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-ultralytics-8A2BE2.svg)](https://docs.ultralytics.com/)
 [![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.13+-097988.svg)](https://docs.llamaindex.ai/)
 [![DashScope](https://img.shields.io/badge/DashScope-Qwen-FF6F00.svg)](https://bailian.console.aliyun.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-Local-000000.svg)](https://ollama.com/)
+[![Tavily](https://img.shields.io/badge/Tavily-Search-01B0CD.svg)](https://tavily.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B.svg)](https://streamlit.io/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-基于 **LangGraph 多智能体编排** 的多模态 AI 系统。用户可通过自然语言对话上传图片，系统自动调用 **YOLOv8** 完成口罩佩戴检测，并结合 **RAG 知识库**与**联网搜索**，精准回答口罩标准、选型、佩戴规范等专业问题。LLM 自主决策工具调用路径，实现"视觉检测 + 知识检索 + 实时信息"一站式闭环，显著提升检测可解释性与问答专业度。
+基于 **LangGraph 编排** 的单 LLM 智能体。用户通过对话上传图片，由单一 LLM 自主决策，调度 **YOLOv8**(视觉检测)、**RAG 知识库**、**Tavily 联网搜索** 等工具，精准回答口罩标准、选型、佩戴规范等专业问题。
+
+- **单 LLM 决策 + 多工具协同**:决策 LLM 仅负责文本理解与任务规划,图像检测由独立 YOLOv8 模型承担(LLM 本身不处理图像),实现"视觉检测 + 知识检索 + 实时信息"一站式闭环。
+- **云端 / 本地双部署**:决策 LLM 可一键切换——云端用阿里云百炼(开箱即用,质量高),本地用 **Ollama** 部署(无需 API Key、数据不出域、离线可用),满足从快速体验 到 私有化落地的不同场景。
 
 ---
 
@@ -100,7 +105,7 @@ graph TB
 
     subgraph Tools["工具节点（被动调用）"]
         D1[mask_detect<br/>YOLOv8 检测]
-        D2[web_search<br/>DashScope 搜索]
+        D2[web_search<br/>Tavily 搜索]
         D3[rag_search<br/>LlamaIndex 检索]
     end
 
@@ -149,7 +154,7 @@ flowchart TD
     CheckStep -->|是| Route{路由决策}
 
     Route -->|mask_detect| MaskDetect[YOLOv8 检测]
-    Route -->|search| WebSearch[DashScope 搜索]
+    Route -->|search| WebSearch[Tavily 搜索]
     Route -->|rag_search| RagSearch[LlamaIndex 检索]
     Route -->|finish| Final
 
@@ -177,7 +182,7 @@ flowchart TD
 ### 1. 安装
 
 ```bash
-git clone https://github.com/<your-username>/mask-detection-agent.git
+git clone https://github.com/fangkai00/mask-detection-agent.git
 cd mask-detection-agent
 
 conda create -n mask-agent python=3.10 -y
@@ -200,8 +205,10 @@ cp mask_agent/config/config.yaml.example mask_agent/config/config.yaml
 
 | 配置项 | 说明 | 必填 |
 |--------|------|------|
-| `DASHSCOPE_API_KEY` | 阿里云百炼 API Key | 是 |
-| `LLM_PROVIDER` | `dashscope`（云端）/ `ollama`（本地） | 是 |
+| `LLM_PROVIDER` | `dashscope`（云端）/ `ollama`（本地部署） | 是 |
+| `DASHSCOPE_API_KEY` | 阿里云百炼 API Key（`dashscope` 模式必填） | `dashscope` 模式必填 |
+| `OLLAMA_MODEL` | 本地 Ollama 模型名，如 `qwen2.5:7b`（`ollama` 模式必填，需先 `ollama pull`） | `ollama` 模式必填 |
+| `TAVILY_API_KEY` | Tavily 联网搜索 API Key | 是 |
 | `MASK_MODEL_WEIGHTS` | YOLOv8 权重路径（留空自动搜索） | 否 |
 
 ### 3. 训练 YOLOv8（可选）
@@ -222,6 +229,8 @@ python agent_cli.py --test "N95和医用外科口罩有什么区别?"  # 单条�
 ```
 
 浏览器自动打开 `http://localhost:8501`，支持图片上传 / 粘贴 / 截图。
+
+> **本地部署（无外网 / 数据不出域）**：安装 [Ollama](https://ollama.com/) 后 `ollama pull 模型名称(modelscope/huggingface查找)`，在 `config.yaml` 设 `LLM_PROVIDER: "ollama"` 即可完全离线运行（决策 LLM 走本地，不调用任何云端 API）。联网搜索仍走 Tavily，与 LLM 部署方式解耦。
 
 ---
 

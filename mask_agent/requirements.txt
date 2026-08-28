@@ -21,7 +21,9 @@ opencv-python>=4.5.0
 numpy>=1.24.0
 Pillow>=9.0.0
 
-# 联网搜索（DashScope enable_search 复用 openai 客户端，无需额外依赖）
+# 联网搜索（Tavily 主，DuckDuckGo 兜底）
+tavily-python>=0.5.0
+duckduckgo-search>=6.0.0
 
 # RAG 知识库(LlamaIndex + DashScope Embedding)
 llama-index-core>=0.13.0

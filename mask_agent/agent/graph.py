@@ -403,7 +403,7 @@ def mask_detect_node(state: AgentState) -> dict:
 
 
 def search_node(state: AgentState) -> dict:
-    """搜索节点:DashScope Qwen enable_search 联网搜索。"""
+    """搜索节点:基于 Tavily 的联网搜索(可回退 DuckDuckGo)。"""
     args = {"query": state["user_query"]}
     result = safe_tool_call(WebSearchTool(), args, tool_name="web_search")
 

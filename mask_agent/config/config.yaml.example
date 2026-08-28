@@ -72,11 +72,20 @@ MASK_API_HOST: "0.0.0.0"
 MASK_API_PORT: 8000
 
 # ============================================================
-# 联网搜索配置(用于回答口罩政策等时效性问题)
+# 联网搜索配置(基于 Tavily,可回退 DuckDuckGo)
+# 用于回答口罩政策、防护知识、公共卫生新闻等时效性问题。
+# 联网搜索与 LLM_PROVIDER 解耦,dashscope/ollama 模式下均走 Tavily/ DuckDuckGo。
 # ============================================================
-# 复用 DashScope Qwen 的 enable_search 能力
-SEARCH_LLM_MODEL: "qwen-max"
-SEARCH_RESULT_COUNT: 6
+# 搜索后端选择:auto(推荐,自动探测)/ tavily / duckduckgo / none
+SEARCH_PROVIDER: "auto"
+
+# Tavily 搜索(推荐,质量高;申请地址 https://tavily.com)
+# API Key 直接填在下方(不读环境变量)
+TAVILY_API_KEY: "tvly-your-tavily-key-here"
+# Tavily 单次搜索返回结果数上限
+TAVILY_MAX_RESULTS: 5
+
+# 搜索结果返回条数(统一用于 search 节点结果截断;优先级高于 TAVILY_MAX_RESULTS)
 SEARCH_NUM_RESULTS: 5
 
 # ============================================================
